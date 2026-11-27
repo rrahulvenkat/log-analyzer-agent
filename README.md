@@ -27,6 +27,14 @@ uv sync
 echo "ANTHROPIC_API_KEY=sk-ant-..." > .env
 ```
 
+### Getting the data
+
+The log data isn't in this repository (`data/` is in `.gitignore`, so logs are
+never committed by accident). Download `OpenSSH_2k.log_structured.csv` from the
+`OpenSSH` folder of the [Loghub](https://github.com/logpai/loghub) repository
+and save it as `data/OpenSSH_2k.log_structured.csv`, or point `--csv` at your
+own file in the same format.
+
 ## Run
 
 ```bash
