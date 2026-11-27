@@ -1,10 +1,11 @@
 [project]
 name = "loganalyzeragent"
 version = "0.1.0"
-description = "Add your description here"
+description = "Detect SSH brute-force attempts by having Claude read OpenSSH log lines"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "anthropic>=1.7.0",
+    "pydantic>=2.0",
     "python-dotenv>=1.2.3",
 ]
