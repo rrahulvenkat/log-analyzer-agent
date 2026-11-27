@@ -1,9 +1,9 @@
-# LogAnalyzerAgent
+# log-analyzer-agent
 
 Finds SSH brute-force attempts in server logs by asking Claude to read each log
 line and pull out the useful bits (IP address, username, what happened).
 
-This is the AI version of [LogAnalyzer](../LogAnalyzer), which does the same job
+This is the AI version of [ssh-log-analyzer](https://github.com/rrahulvenkat/ssh-log-analyzer), which does the same job
 with regular expressions. The regex version is free and instant; this one is
 slower and costs a little, but it can handle log lines nobody wrote a pattern
 for.
