@@ -33,6 +33,8 @@ def write_csv(folder, rows):
 
 def honest_answer(content):
     """What a well-behaved model would return for the lines used here."""
+    if content.startswith("message repeated "):         # read the line inside [ ... ]
+        content = content.split("[", 1)[1].strip(" ]")
     words = content.split()
     if content.startswith("Failed "):
         user = words[5] if words[3:5] == ["invalid", "user"] else words[3]
@@ -197,6 +199,42 @@ def test_repeated_lines_reuse_one_answer():                            # FIX 9
     rows = [("Dec", 10, f"07:00:{s:02d}", same) for s in range(20)]
     stats, _, client, _ = run(rows)
     assert len(client.calls) == 1 and stats["reused"] == 19 and stats["stored"] == 20
+
+
+def test_repeated_message_counts_every_attempt():                      # FIX 10
+    rows = [("Dec", 10, "07:00:00", failed("7.7.7.7")),
+            ("Dec", 10, "07:00:05", "message repeated 4 times: [ " + failed("7.7.7.7") + "]"),
+            ("Dec", 10, "07:00:06", "message repeated 3 times: [ Server listening on 0.0.0.0]")]
+    stats, db, client, _ = run(rows)
+    [(ip, total, peak, _)] = find_brute_force(db, threshold=5)
+    assert (ip, total, peak) == ("7.7.7.7", 5, 5)     # 1 + 4; the non-login repeat adds 0
+
+
+def test_count_comes_from_the_text_not_the_model():                    # FIX 10
+    line = "message repeated 6 times: [ " + failed("8.8.8.8") + "]"
+    lying = LogFields(ip_address="8.8.8.8", username="root", failure_reason=None,
+                      event_type="other", port=4000)     # wrong label: checks fix it
+    _, db, _, _ = run([("Dec", 10, "07:00:00", line)], client=FakeClient({line: lying}))
+    assert find_brute_force(db, threshold=5)[0][:3] == ("8.8.8.8", 6, 6)
+
+
+def test_database_without_attempts_column_is_upgraded():                # FIX 10
+    folder = tempfile.mkdtemp()
+    db = Path(folder) / "out.db"
+    conn = sqlite3.connect(db)
+    conn.execute("""CREATE TABLE ssh_logs (line_id INTEGER PRIMARY KEY, timestamp TEXT,
+                    pid TEXT, raw_content TEXT, ip_address TEXT, username TEXT,
+                    failure_reason TEXT, event_type TEXT, port INTEGER, check_notes TEXT)""")
+    line = "message repeated 5 times: [ " + failed("9.9.9.9") + "]"
+    conn.execute("INSERT INTO ssh_logs VALUES (1, '2026-12-10T07:00:00+00:00', '1', ?, "
+                 "'9.9.9.9', 'root', NULL, 'failed_login', 4000, NULL)", (line,))
+    conn.commit()
+    conn.close()
+    csv_path = write_csv(folder, [("Dec", 10, "07:00:00", line)])
+    client = FakeClient()
+    process_logs(client, csv_path, db, year=2026, log=lambda m: None)
+    assert client.calls == []                           # no new API calls
+    assert find_brute_force(db, threshold=5)[0][:3] == ("9.9.9.9", 5, 5)
 
 
 def test_missing_columns_and_files_give_clear_errors():                # FIX 7

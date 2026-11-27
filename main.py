@@ -105,6 +105,22 @@ def check_fields(fields: LogFields, content: str) -> tuple[LogFields, list[str]]
     return fields.model_copy(update=updates), notes
 
 
+# FIX 10: syslog folds N identical lines into one, "message repeated N times:
+# [ Failed password ... ]", and that one line is N attempts, not 1. Counting it
+# once hid 2 of the 11 brute-force IPs in the Loghub sample. The number comes
+# from the raw text with a fixed rule, never from Claude, so a wrong answer
+# (or an injected one) can't change it.
+REPEATED = re.compile(r"^message repeated (\d+) times: \[")
+
+
+def attempts_in(content: str, event_type: str) -> int:
+    """How many login attempts this line stands for."""
+    if event_type != "failed_login":
+        return 0
+    repeated = REPEATED.match(content)
+    return int(repeated[1]) if repeated else 1
+
+
 # ---------------------------------------------------------------------------
 # FIX 4: errors that stop the run vs errors that skip one line
 # ---------------------------------------------------------------------------
@@ -192,9 +208,18 @@ def setup_db(conn, log=print):
             failure_reason TEXT,
             event_type TEXT,
             port INTEGER,
-            check_notes TEXT
+            check_notes TEXT,
+            attempts INTEGER
         )
     """)
+    # FIX 10: a database made before the attempts column gets it added and
+    # filled in from the stored lines, with no API calls.
+    if columns and "line_id" in columns and "attempts" not in columns:
+        conn.execute("ALTER TABLE ssh_logs ADD COLUMN attempts INTEGER")
+        rows = conn.execute("SELECT line_id, raw_content, event_type FROM ssh_logs").fetchall()
+        conn.executemany("UPDATE ssh_logs SET attempts = ? WHERE line_id = ?",
+                         [(attempts_in(c or "", e), i) for i, c, e in rows])
+        log(f"Added the attempts column to {len(rows)} stored lines.")
     conn.execute("CREATE INDEX IF NOT EXISTS ssh_logs_content ON ssh_logs (raw_content)")
     conn.commit()
 
@@ -277,11 +302,11 @@ def process_logs(client, csv_path, db_path, limit=50, year=None, log=print):
                 conn.execute("""
                     INSERT OR REPLACE INTO ssh_logs
                     (line_id, timestamp, pid, raw_content, ip_address, username,
-                     failure_reason, event_type, port, check_notes)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     failure_reason, event_type, port, check_notes, attempts)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (line_id, when.isoformat(), row.get("Pid"), content, fields.ip_address,
                       fields.username, fields.failure_reason, fields.event_type,
-                      fields.port, notes))
+                      fields.port, notes, attempts_in(content, fields.event_type)))
                 stats["stored"] += 1
                 if stats["stored"] % 25 == 0:
                     conn.commit()                     # FIX 7: commit in batches
@@ -299,12 +324,13 @@ def process_logs(client, csv_path, db_path, limit=50, year=None, log=print):
 #   Failed password for invalid user admin ...    (failed_login)
 # Counting both doubled every number, so only failed_login is counted.
 # Then a sliding window (a deque) finds the most failures inside --window.
+# A "message repeated N times" line puts N attempts at its timestamp (FIX 10).
 
 def find_brute_force(db_path, threshold=5, window=timedelta(minutes=10)):
     conn = sqlite3.connect(db_path)
     try:
         rows = conn.execute("""
-            SELECT ip_address, timestamp, username FROM ssh_logs
+            SELECT ip_address, timestamp, username, attempts FROM ssh_logs
             WHERE event_type = 'failed_login' AND ip_address IS NOT NULL
             ORDER BY ip_address, timestamp, line_id
         """).fetchall()
@@ -312,8 +338,9 @@ def find_brute_force(db_path, threshold=5, window=timedelta(minutes=10)):
         conn.close()
 
     by_ip = defaultdict(list)
-    for ip, stamp, user in rows:
-        by_ip[ip].append((datetime.fromisoformat(stamp), user))
+    for ip, stamp, user, attempts in rows:
+        when = datetime.fromisoformat(stamp)
+        by_ip[ip].extend([(when, user)] * (attempts or 1))
 
     suspects = []
     for ip, attempts in by_ip.items():

@@ -50,6 +50,10 @@ Re-running is safe: lines already in the database are skipped (so an
 interrupted run resumes without paying again), and a line that's already been
 answered is never sent twice, so repeated lines cost one API call.
 
+syslog can fold N identical lines into `message repeated N times: [ ... ]`;
+that line counts as N attempts. The number is read from the text by a fixed
+rule, not from Claude.
+
 Exit codes: `0` nothing found, `1` brute force found, `2` error.
 
 ## Untrusted input
@@ -97,6 +101,3 @@ The tests use a fake Claude client: no API key, no network, no cost.
 - **A newer model.** `claude-haiku-5-5` costs a tenth of `claude-haiku-4-5`, but
   it thinks before answering by default, so `max_tokens` and effort need tuning.
   Compare both on a sample before switching.
-- **Count repeated messages.** syslog can fold N identical lines into
-  `message repeated N times: [ ... ]`; those are labelled correctly but still
-  counted once.
