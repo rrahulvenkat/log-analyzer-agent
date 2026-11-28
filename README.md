@@ -3,6 +3,12 @@
 Finds SSH brute-force attempts in server logs by asking Claude to read each log
 line and pull out the useful bits (IP address, username, what happened).
 
+> **Part of a four-step series on SSH brute-force detection:**
+> 1. [ssh-log-analyzer](https://github.com/rrahulvenkat/ssh-log-analyzer): regex rules
+> 2. **log-analyzer-agent** (this repo): Claude reads each line
+> 3. [ssh-detection-eval](https://github.com/rrahulvenkat/ssh-detection-eval): the two compared
+> 4. [ssh-hybrid-detector](https://github.com/rrahulvenkat/ssh-hybrid-detector): rules first, Claude for the rest
+
 This is the AI version of [ssh-log-analyzer](https://github.com/rrahulvenkat/ssh-log-analyzer), which does the same job
 with regular expressions. The regex version is free and instant; this one is
 slower and costs a little, but it can handle log lines nobody wrote a pattern
@@ -17,6 +23,12 @@ for.
    doesn't support (see "Untrusted input" below)
 4. Saves everything to a SQLite database (`ssh_logs.db`)
 5. Flags IPs with too many failed logins inside a time window
+
+**On a real server:** this tool reads only Loghub's CSV, not a raw
+`/var/log/auth.log`. To scan a real server's logs, use
+[ssh-hybrid-detector](https://github.com/rrahulvenkat/ssh-hybrid-detector):
+`python hybrid.py /var/log/auth.log` reads raw syslog lines, uses rules
+for the formats it knows, and asks Claude only about the rest.
 
 ## Setup
 
